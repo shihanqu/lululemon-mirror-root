@@ -93,29 +93,23 @@ The script:
 * converts the Android sparse image to raw ext4 if necessary,
 * writes `build/mirror_root.ko` to `/lib/modules/adsprpc.ko` (0644, root:root),
 * writes the adb public key to `/system/etc/adb_keys` (0644, root:root),
+* writes `/system/etc/adb_tcp_port` when `ADB_TCP_PORT` is set,
 * runs `e2fsck -fy`,
 * re-encodes the result as a sparse image.
 
 The vendor Wi-Fi driver and its symlink are left exactly as shipped.
 
-`ADB_TCP_PORT` is optional and enables `adbd` on TCP as well, so the unit can be
-reached over the network. Two platform details make that work, and both are handled
-by the module:
+Both files are consumed by the module at boot: the key makes the unit authorise this
+host, and `ADB_TCP_PORT` brings up a key-authenticated `adbd` listener on the network.
+Two firmware quirks make that non-obvious — `adbd` prefers the ramdisk `/adb_keys`
+over `/data/misc/adb/adb_keys`, and `service.adb.tcp.port` is only writable from the
+`shell` SELinux domain — and the module handles both. The full procedure, the failure
+signatures and the way to turn the listener off again are in
+[docs/ADB.md](docs/ADB.md).
 
-* `adbd` builds its key list from the ramdisk `/adb_keys` when that file exists and
-  ignores `/data/misc/adb/adb_keys`, so the module bind-mounts the key file over
-  `/adb_keys`; otherwise TCP transports can never authenticate, while USB still can
-  because the framework approves those itself.
-* `service.adb.tcp.port` is writable only from the `shell` SELinux domain — a uid-0
-  write is silently dropped — so the module writes it with
-  `runcon u:r:shell:s0 setprop …` and restarts `adbd` to open the listener.
-
-The key file is not optional in practice. `ro.adb.secure=1` comes from the boot
-ramdisk's `default.prop`, so `/adb_keys` and `/data/misc/adb/adb_keys` are the only
-ways to authorise a host, and a unit that has never seen your key sits at
-`unauthorized` — with no touch input, the on-glass prompt cannot be accepted. The
-module installs the key at boot and restarts `adbd`; the install is idempotent and a
-no-op when the file is absent.
+The key file is not optional in practice: `ro.adb.secure=1` comes from the boot
+ramdisk, and a unit that has never seen your key sits at `unauthorized` with no touch
+input to accept the prompt.
 
 ## Flash
 
