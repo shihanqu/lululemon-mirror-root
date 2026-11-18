@@ -95,6 +95,23 @@ It does not touch `/lib/modules/wlan.ko` or the vendor Wi-Fi driver.
 
 ---
 
+### Fresh unit with no approved adb key
+
+`ro.adb.secure=1` and `ro.debuggable` live in the boot ramdisk's `default.prop`,
+so `/adb_keys` and `/data/misc/adb/adb_keys` are the only ways to authorise a
+host, and a unit that has never seen your key sits at `unauthorized` — with no
+touch input, the on-glass prompt cannot be accepted.
+
+Ship the public key with the image:
+
+```sh
+ADB_KEYS=~/.android/adbkey.pub scripts/patch_image.sh system.img system-rooted.img
+```
+
+At boot the module appends those lines to both key files and cycles
+`sys.usb.config none → adb`, so `adbd` re-reads them. It is idempotent and a no-op
+when `/system/etc/adb_keys` is absent.
+
 ## Flash
 
 ```sh

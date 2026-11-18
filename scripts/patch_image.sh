@@ -49,6 +49,19 @@ for f in "mode 0100644" "uid 0" "gid 0"; do
 	debugfs -w -R "sif /lib/modules/adsprpc.ko $f" "$work/raw.img" >/dev/null
 done
 
+# 2b. optional: install adb public keys so a fresh unit can authorise USB
+#     (ro.adb.secure=1 comes from the boot ramdisk; the module copies this file
+#      into /adb_keys and /data/misc/adb/adb_keys at boot and restarts adbd)
+if [ -n "${ADB_KEYS:-}" ]; then
+	[ -f "$ADB_KEYS" ] || { echo "ADB_KEYS set but $ADB_KEYS missing" >&2; exit 1; }
+	debugfs -w -R "rm /etc/adb_keys" "$work/raw.img" >/dev/null 2>&1 || true
+	debugfs -w -R "write $ADB_KEYS /etc/adb_keys" "$work/raw.img" >/dev/null
+	for f in "mode 0100644" "uid 0" "gid 0"; do
+		debugfs -w -R "sif /etc/adb_keys $f" "$work/raw.img" >/dev/null
+	done
+	echo "installed adb keys from $ADB_KEYS"
+fi
+
 # 3. verify and re-encode
 e2fsck -fy "$work/raw.img" >/dev/null
 python3 "$root/tools/raw2sparse.py" "$work/raw.img" "$out"

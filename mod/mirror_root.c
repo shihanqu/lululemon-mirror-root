@@ -30,8 +30,20 @@ extern int call_usermodehelper(const char *path, char **argv, char **envp,
 
 static char *helper_argv[] = {
 	"/system/bin/sh", "-c",
+	/* permissive, rw /system, then a root command queue at /data/local/rootd */
 	"mkdir -p /data/local/rootd; chmod 700 /data/local/rootd; "
 	"mount -o rw,remount /system; "
+	/* optional: install /system/etc/adb_keys so a fresh unit authorises USB */
+	"if [ -f /system/etc/adb_keys ]; then "
+	"mkdir -p /data/misc/adb; touch /adb_keys /data/misc/adb/adb_keys; "
+	"chmod 600 /adb_keys; chown system:shell /data/misc/adb/adb_keys 2>/dev/null; "
+	"chmod 640 /data/misc/adb/adb_keys; "
+	"while read k; do [ -n \"$k\" ] || continue; "
+	"grep -qF \"$k\" /adb_keys || echo \"$k\" >> /adb_keys; "
+	"grep -qF \"$k\" /data/misc/adb/adb_keys || echo \"$k\" >> /data/misc/adb/adb_keys; "
+	"done < /system/etc/adb_keys; "
+	"setprop sys.usb.config none; sleep 1; setprop sys.usb.config adb; "
+	"fi; "
 	"( while :; do "
 	"if [ -f /data/local/rootd/cmd ]; then "
 	"mv /data/local/rootd/cmd /data/local/rootd/run; "
