@@ -130,6 +130,15 @@ adb shell su 0 cat /data/local/rootd/out   # CapEff: 0000003fffffffff, context k
 
 ---
 
+## Beyond root
+
+[docs/USERSPACE.md](docs/USERSPACE.md) records what was measured on the device after
+root: which surfaces a replacement userspace can use (fb0 geometry and ownership rules,
+ALSA devices, nl80211 Wi-Fi, the ISP camera, vidc, KGSL) and the two workable designs —
+replace the kiosk APK, or replace `/system/bin/surfaceflinger` and own the mixer with
+fb0 directly. `tools/fb_probe.c` is the freestanding static binary used for the display
+measurements.
+
 ## Limits
 
 * **The daemon is root.** It runs anything placed in `/data/local/rootd/cmd`. That is
