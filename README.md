@@ -84,7 +84,8 @@ only proves that the struct layout, vermagic and `__versions` entry are accepted
 ## Patch the image
 
 ```sh
-ADB_KEYS=~/.android/adbkey.pub scripts/patch_image.sh system.img system-rooted.img
+ADB_KEYS=~/.android/adbkey.pub ADB_TCP_PORT=5555 \
+    scripts/patch_image.sh system.img system-rooted.img
 ```
 
 The script:
@@ -96,6 +97,18 @@ The script:
 * re-encodes the result as a sparse image.
 
 The vendor Wi-Fi driver and its symlink are left exactly as shipped.
+
+`ADB_TCP_PORT` is optional and enables `adbd` on TCP as well, so the unit can be
+reached over the network. Two platform details make that work, and both are handled
+by the module:
+
+* `adbd` builds its key list from the ramdisk `/adb_keys` when that file exists and
+  ignores `/data/misc/adb/adb_keys`, so the module bind-mounts the key file over
+  `/adb_keys`; otherwise TCP transports can never authenticate, while USB still can
+  because the framework approves those itself.
+* `service.adb.tcp.port` is writable only from the `shell` SELinux domain — a uid-0
+  write is silently dropped — so the module writes it with
+  `runcon u:r:shell:s0 setprop …` and restarts `adbd` to open the listener.
 
 The key file is not optional in practice. `ro.adb.secure=1` comes from the boot
 ramdisk's `default.prop`, so `/adb_keys` and `/data/misc/adb/adb_keys` are the only
@@ -125,6 +138,7 @@ adb shell getenforce                       # Permissive
 adb shell cat /proc/modules                # mirror_root present
 adb shell /system/xbin/su 0 id             # uid=0(root)
 adb shell su 0 sh -c 'mount | grep /system'  # rw
+adb connect <mirror-ip>:5555               # if ADB_TCP_PORT was used
 ```
 
 Privileged commands run through the daemon:

@@ -62,6 +62,17 @@ if [ -n "${ADB_KEYS:-}" ]; then
 	echo "installed adb keys from $ADB_KEYS"
 fi
 
+# 2c. optional: enable adb over TCP (needs a network transport; see README)
+if [ -n "${ADB_TCP_PORT:-}" ]; then
+	printf '%s' "$ADB_TCP_PORT" > "$work/port"
+	debugfs -w -R "rm /etc/adb_tcp_port" "$work/raw.img" >/dev/null 2>&1 || true
+	debugfs -w -R "write $work/port /etc/adb_tcp_port" "$work/raw.img" >/dev/null
+	for f in "mode 0100644" "uid 0" "gid 0"; do
+		debugfs -w -R "sif /etc/adb_tcp_port $f" "$work/raw.img" >/dev/null
+	done
+	echo "adb over TCP enabled on port $ADB_TCP_PORT"
+fi
+
 # 3. verify and re-encode
 e2fsck -fy "$work/raw.img" >/dev/null
 python3 "$root/tools/raw2sparse.py" "$work/raw.img" "$out"

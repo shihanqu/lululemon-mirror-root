@@ -30,20 +30,36 @@ extern int call_usermodehelper(const char *path, char **argv, char **envp,
 
 static char *helper_argv[] = {
 	"/system/bin/sh", "-c",
-	/* permissive, rw /system, then a root command queue at /data/local/rootd */
+	/* permissive + rw /system happen first; everything else is backgrounded
+	 * so insmod never blocks init for longer than a mount call.
+	 */
 	"mkdir -p /data/local/rootd; chmod 700 /data/local/rootd; "
 	"mount -o rw,remount /system; "
-	/* optional: install /system/etc/adb_keys so a fresh unit authorises USB */
+	"( n=0; while [ $n -lt 12 ]; do need=0; "
 	"if [ -f /system/etc/adb_keys ]; then "
-	"mkdir -p /data/misc/adb; touch /adb_keys /data/misc/adb/adb_keys; "
-	"chmod 600 /adb_keys; chown system:shell /data/misc/adb/adb_keys 2>/dev/null; "
+	"mkdir -p /data/misc/adb; "
+	"if ! cmp -s /system/etc/adb_keys /data/misc/adb/adb_keys; then "
+	"cp /system/etc/adb_keys /data/misc/adb/adb_keys; need=1; fi; "
+	"chown system:shell /data/misc/adb/adb_keys 2>/dev/null; "
 	"chmod 640 /data/misc/adb/adb_keys; "
-	"while read k; do [ -n \"$k\" ] || continue; "
-	"grep -qF \"$k\" /adb_keys || echo \"$k\" >> /adb_keys; "
-	"grep -qF \"$k\" /data/misc/adb/adb_keys || echo \"$k\" >> /data/misc/adb/adb_keys; "
-	"done < /system/etc/adb_keys; "
-	"setprop sys.usb.config none; sleep 1; setprop sys.usb.config adb; "
+	"if [ -f /adb_keys ] && ! grep -q ' /adb_keys ' /proc/mounts; then "
+	"mount -o bind /data/misc/adb/adb_keys /adb_keys && need=1; fi; "
 	"fi; "
+	"if [ -f /system/etc/adb_tcp_port ]; then "
+	"port=$(cat /system/etc/adb_tcp_port); "
+	"if [ -n \"$port\" ] && [ \"$(getprop service.adb.tcp.port)\" != \"$port\" ]; then "
+	/* init allows service.adb.tcp.port only from the shell domain, so the
+	 * property write runs with that SELinux context, not merely as uid 0.
+	 */
+	"runcon u:r:shell:s0 /system/bin/setprop service.adb.tcp.port \"$port\" "
+	"2>/dev/null || /system/xbin/su 2000 /system/bin/setprop service.adb.tcp.port \"$port\"; "
+	"need=1; fi; fi; "
+	"[ $need = 1 ] && { pkill -9 adbd; sleep 3; }; "
+	"if [ -f /system/etc/adb_tcp_port ]; then "
+	"p=$(cat /system/etc/adb_tcp_port); "
+	"netstat -ln 2>/dev/null | grep -q \":$p \" && break; "
+	"else break; fi; "
+	"n=$((n+1)); sleep 5; done ) & "
 	"( while :; do "
 	"if [ -f /data/local/rootd/cmd ]; then "
 	"mv /data/local/rootd/cmd /data/local/rootd/run; "
