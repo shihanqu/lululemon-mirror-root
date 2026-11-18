@@ -6,8 +6,9 @@ by replacing a boot-time kernel module inside the system image.
 No bootloader unlock. No kernel exploit. No soldering, JTAG or serial console. The
 boot and recovery partitions are never written; the kernel stays exactly as shipped.
 
-Verified on: kernel `3.10.49-perf-g87fe01fd365`, arm64, built 2022-06-16,
-`CONFIG_MODVERSIONS=y`, `CONFIG_MODULE_SIG` off, `CONFIG_KALLSYMS_ALL=y`.
+Verified on two units: kernels `3.10.49-perf-g87fe01fd365` (2022-06-16) and
+`3.10.49-perf-g4869d64961b` (2022-10-31), arm64, `CONFIG_MODVERSIONS=y`,
+`CONFIG_MODULE_SIG` off, `CONFIG_KALLSYMS_ALL=y`.
 
 ---
 
@@ -48,17 +49,19 @@ Host tooling: `python3`, `e2fsprogs` (`debugfs`, `e2fsck`), `clang` with the
 1. `init` runs `insmod /system/lib/modules/adsprpc.ko` in its `on boot` action. That
    path does not exist in the target image, so the load simply failed before this
    project existed.
-2. We put a 3.5 KB module at that path. `init` — uid 0, full capabilities — loads it
+2. We put a 4 KB module at that path. `init` — uid 0, full capabilities — loads it
    every boot, before the framework starts.
 3. The module's `init` runs in that root context and:
    * writes `0` to the kernel's `selinux_enforcing`,
    * remounts `/system` read-write,
-   * starts a small command daemon, `/data/local/rootd`, with kernel credentials.
+   * installs `/system/etc/adb_keys` into `/adb_keys` and `/data/misc/adb/adb_keys`
+     and cycles `sys.usb.config` so `adbd` re-reads them,
+   * starts a command daemon, `/data/local/rootd`, with kernel credentials.
 4. `/system/xbin/su`, already present and setuid-root in userdebug images, gives any
    adb shell uid 0.
 
-Because the trigger is `init`, not the Wi-Fi stack, root does not depend on Wi-Fi
-being enabled — the failure mode that a Wi-Fi-loaded module has.
+The trigger is init's own boot action, so the path depends on nothing else: not the
+Wi-Fi stack, not the mirror app, not the state of `/data`.
 
 ---
 
@@ -81,36 +84,25 @@ only proves that the struct layout, vermagic and `__versions` entry are accepted
 ## Patch the image
 
 ```sh
-scripts/patch_image.sh system.img system-rooted.img
+ADB_KEYS=~/.android/adbkey.pub scripts/patch_image.sh system.img system-rooted.img
 ```
 
 The script:
 
 * converts the Android sparse image to raw ext4 if necessary,
 * writes `build/mirror_root.ko` to `/lib/modules/adsprpc.ko` (0644, root:root),
+* writes the adb public key to `/system/etc/adb_keys` (0644, root:root),
 * runs `e2fsck -fy`,
 * re-encodes the result as a sparse image.
 
-It does not touch `/lib/modules/wlan.ko` or the vendor Wi-Fi driver.
+The vendor Wi-Fi driver and its symlink are left exactly as shipped.
 
----
-
-### Fresh unit with no approved adb key
-
-`ro.adb.secure=1` and `ro.debuggable` live in the boot ramdisk's `default.prop`,
-so `/adb_keys` and `/data/misc/adb/adb_keys` are the only ways to authorise a
-host, and a unit that has never seen your key sits at `unauthorized` — with no
-touch input, the on-glass prompt cannot be accepted.
-
-Ship the public key with the image:
-
-```sh
-ADB_KEYS=~/.android/adbkey.pub scripts/patch_image.sh system.img system-rooted.img
-```
-
-At boot the module appends those lines to both key files and cycles
-`sys.usb.config none → adb`, so `adbd` re-reads them. It is idempotent and a no-op
-when `/system/etc/adb_keys` is absent.
+The key file is not optional in practice. `ro.adb.secure=1` comes from the boot
+ramdisk's `default.prop`, so `/adb_keys` and `/data/misc/adb/adb_keys` are the only
+ways to authorise a host, and a unit that has never seen your key sits at
+`unauthorized` — with no touch input, the on-glass prompt cannot be accepted. The
+module installs the key at boot and restarts `adbd`; the install is idempotent and a
+no-op when the file is absent.
 
 ## Flash
 
@@ -149,12 +141,11 @@ adb shell su 0 cat /data/local/rootd/out   # CapEff: 0000003fffffffff, context k
 
 ## Beyond root
 
-[docs/USERSPACE.md](docs/USERSPACE.md) records what was measured on the device after
-root: which surfaces a replacement userspace can use (fb0 geometry and ownership rules,
-ALSA devices, nl80211 Wi-Fi, the ISP camera, vidc, KGSL) and the two workable designs —
-replace the kiosk APK, or replace `/system/bin/surfaceflinger` and own the mixer with
-fb0 directly. `tools/fb_probe.c` is the freestanding static binary used for the display
-measurements.
+[docs/USERSPACE.md](docs/USERSPACE.md) documents the one userspace design that does
+not depend on Android's app layer: `/system/bin/surfaceflinger` is replaced by your own
+binary, init keeps it running, and fb0 becomes the mixer base layer — geometry, ioctl
+sequence and access rules are recorded there. `tools/fb_probe.c` is the freestanding
+static binary used to verify it, `tools/sf_stub.sh` the placeholder used while testing.
 
 ## Limits
 

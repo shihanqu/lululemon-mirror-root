@@ -148,20 +148,19 @@ here: 3D acceleration is KGSL plus Android's EGL blobs.
 
 ## What this means
 
-Two viable ways to run your own software, with very different costs:
+One design, the one that does not depend on Android's app layer: replace
+`/system/bin/surfaceflinger` with your own binary. init starts it at boot as uid
+`system` in group `graphics`, so fb0 opens without capability tricks; the mixer
+base layer is the framebuffer, panned explicitly; no Java, no SF, no zygote.
 
-**A. Replace the kiosk app.** The running app is `dev.mirror.debug` v1.462142, installed in
-`/data/app/dev.mirror.debug-2` — not a system app, so it can be replaced by installing your
-APK. You keep HWC composition, camera, audio, hardware decode and Wi-Fi. Your code, Lululemon's
-stack gone, boot chain untouched.
+Cost: hardware video decode and the camera are not reachable, because both need
+Android userspace (OMX/MediaCodec and mm-camera). 3D is limited to what you
+implement over KGSL, since freedreno has no `/dev/dri` to bind to. What remains is
+a 1920×1080, 32 bpp, two-buffer framebuffer you own, plus ALSA, nl80211 Wi-Fi, USB
+and the eMMC.
 
-**B. Replace `/system/bin/surfaceflinger`.** Your own binary becomes the display owner at
-boot, with fb0 as the mixer base layer and no Java downstream. You lose hardware video decode
-and camera (both depend on Android userspace), and 3D is limited to whatever you implement
-over KGSL. This is a genuine framebuffer kiosk: 1920×1080, 32 bpp, two buffers, you pan.
-
-A framework-free boot that keeps init's service set is not possible from the system image
-alone; the composer stub is the lever that works, because it is a file in `/system`.
+A framework-free boot that keeps init's service set is not possible from the system
+image alone — the composer is the lever, because it is a file in `/system`.
 
 ## Device-side services worth knowing
 
